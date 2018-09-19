@@ -9,10 +9,10 @@ This is the first and only *individual* (as opposed to *team*) this semester.
 
 Term: Fall 2018
 
-+ Projec title: Lorem ipsum dolor sit amet
++ Projec title: Happy Moment Comparison Analysis
 + This project is conducted by Jannie Chen
 
-+ Project summary: [a short summary] Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
++ Project summary: You’ll see someone always has a happy face and someone keeps upset. But why? Curious about why people feel happy, it’s interesting to investigate the happy moment of people who have different countries, genders, ages, marriages and so on. To learn more, a research about happy moment started and analysis follows.
 
 Following [suggestions](http://nicercode.github.io/blog/2013-04-05-projects/) by [RICH FITZJOHN](http://nicercode.github.io/about/#Team) (@richfitz). This folder is orgarnized as follows.
 
