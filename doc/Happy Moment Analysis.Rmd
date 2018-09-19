@@ -1,0 +1,535 @@
+---
+title: "Happy Moment Comparison Analysis"
+author: "Jannie(Mengqi) Chen mc4398"
+date: "September 16, 2018"
+output: html_document
+---
+
+```{r, echo = FALSE}
+set.seed(1)
+```
+
+You'll see someone always has a happy face and someone keeps upset. But why? Curious about why people feel happy, it's interesting to investigate the happy moment of people who have different countries, genders, ages, marriages and so on. To learn more, a research about happy moment started and analysis follows. 
+
+# Step 0: read data and load libraries
+```{r read data, warning=FALSE, message=FALSE, echo=FALSE}
+library(tm)
+library(rJava)
+library(RColorBrewer)
+library(dplyr)
+library(tidyverse)
+library(tidytext)
+library(tidyr)
+library(sentimentr)
+library(ggplot2)
+library(qdap)
+library(syuzhet)
+library(DT)
+library(scales)
+library(wordcloud)
+library(gridExtra)
+library(ngram)
+library(shiny)
+library(psych)
+library(NLP)
+library(openNLP)
+library(widyr)
+library(ggraph)
+library(igraph)
+library(SnowballC)
+hm_data <- read_csv("/Users/janechen/Desktop/project1/processed_moments.csv")
+
+urlfile<-'https://raw.githubusercontent.com/rit-public/HappyDB/master/happydb/data/demographic.csv'
+demo_data <- read_csv(urlfile)
+```
+
+# Step 1: Process data and give some basic descriptive statistics
+```{r}
+hm_data <- hm_data %>%
+  inner_join(demo_data, by = "wid") %>%
+  select(wid,
+         original_hm,
+         gender, 
+         marital, 
+         parenthood,
+         reflection_period,
+         age, 
+         country, 
+         ground_truth_category, 
+         text) %>%
+  mutate(count = sapply(hm_data$text, wordcount)) %>%
+  mutate(word.count = sapply(hm_data$original_hm, wordcount)) %>%
+  filter(gender %in% c("m", "f")) %>%
+  filter(marital %in% c("single", "married")) %>%
+  filter(parenthood %in% c("n", "y")) %>%
+  filter(reflection_period %in% c("24h", "3m")) %>%
+  mutate(reflection_period = fct_recode(reflection_period, 
+                                        months_3 = "3m", hours_24 = "24h"))
+head(hm_data,5)
+suppressWarnings(describe.by(hm_data))
+```
+
+The data seems good. It has more than 100 thousand observations and 12 variables. The original text "original_hm" has been cleaned and the key words has been put into "text". 
+
+Let's start with the sentence length. How many words did people use to describe their happy moment?
+```{r}
+sentence.length <- hm_data %>% 
+  group_by(gender) %>% 
+  count(word.count, sort = TRUE) %>% 
+  left_join(hm_data %>% 
+              group_by(gender) %>% 
+              summarise(total = n())) %>%
+  mutate(freq = n/total)
+
+head(sentence.length,5)
+```
+
+It seems people usually use 8 to 13 words to record their happy moment. Female would like to speak more about the happy moment, maybe they have more feelings to express. 
+```{r}
+ggplot(sentence.length, aes(x = word.count, y= freq, group = factor(1))) +
+  geom_bar(stat = "identity", color = "cornflowerblue")+
+  ylim(0,0.07) + 
+  xlim(0,100) +
+  theme_bw() +
+  facet_wrap(~ gender, ncol = 2) +
+  labs(title = "Sentence Length for Male and Female", x = "Word Numbers", y = "Frequency")
+head(sentence.length$word.count[sentence.length$gender == "f"],5)
+head(sentence.length$word.count[sentence.length$gender == "m"],5)
+```
+
+# Step 2: Create a bag of words using the text data and analyze the word frequency in different categories
+```{r}
+data(stop_words)
+bag_of_words <-  hm_data %>%
+  unnest_tokens(word, text) 
+head(bag_of_words,5)
+```
+
+## Word cloud
+Overall, time, friend and day are of the highest frequency. Then, home, family, game and others make people feel happy. 
+```{r}
+frequency_word <- bag_of_words %>% 
+  count(word)
+word_cloud <- data.frame(word = frequency_word$word, freq = frequency_word$n)
+set.seed(1)
+suppressWarnings(wordcloud(words = word_cloud$word, freq = word_cloud$freq, min.freq = 1,max.words=200, random.order=FALSE, rot.per=0.35, colors=brewer.pal(8, "Dark2")))
+```
+
+
+
+## Gender Analysis
+We continue to discuss the difference of happy moment of male and female.
+```{r}
+frequency_gender <- bag_of_words %>% 
+  group_by(gender) %>% 
+  count(word, sort = TRUE) %>% 
+  left_join(bag_of_words %>% 
+              group_by(gender) %>% 
+              summarise(total = n())) %>%
+  mutate(freq = n/total)
+
+head(frequency_gender,5)
+```
+
+```{r}
+frequency_gender <- frequency_gender %>% 
+  select(gender, word, freq) %>% 
+  spread(gender, freq) %>%
+  arrange(m, f)
+
+frequency_gender
+```
+
+```{r}
+ggplot(frequency_gender, aes(f, m)) +
+  geom_jitter(alpha = 0.1, size = 2.5, width = 0.25, height = 0.25, color = "#56B4E9") +
+  geom_text(aes(label = word), check_overlap = TRUE, vjust = 1.5) +
+  scale_x_log10(labels = percent_format()) +
+  scale_y_log10(labels = percent_format()) +
+  geom_abline(color = "black") + 
+  theme_bw() +
+  labs(title = "Word Freqencies for Male and Female", x = "Female", y = "Male")
+```
+
+The figure above shows people in both gender feel good due to victory without difference, and they persue winning something. No doubts it's a popular value at present. What's more, males and females are both feel happy due to their partners of high frequency. The words, "husband" and "boyfriend" can delight females  significantly. As for difference, females feel good from people around them, such as sister, dad and kids. Jewelry and kindergarten as well help females feel better. For males, beer, mobile, and hill please them a lot. 
+
+
+## Country Analysis
+Then, we move to different countries. Choose the countries of large population and area with different cultures. 
+```{r}
+frequency_country <- bag_of_words %>% 
+  group_by(country) %>% 
+  count(word, sort = TRUE) %>% 
+  left_join(bag_of_words %>% 
+              group_by(country) %>% 
+              summarise(total = n())) %>%
+  mutate(freq = n/total)
+
+head(frequency_country,5)
+```
+
+```{r}
+ggplot(frequency_country, aes(x=country, y=freq)) +
+  geom_jitter(alpha = 0.1, size = 2.5, width = 0.25, height = 0.25, color = "#56B4E9") +
+  geom_text(aes(label = word), check_overlap = TRUE, vjust = 1.5) +
+  theme_bw() +
+  scale_y_log10(labels = percent_format()) +
+  scale_x_discrete(limits=c("USA", "IND", "CAN", "JPN", "MEX", "PAK", "ITA", "GBR", "IDN", "DEU","FRA")) +
+  labs(title = "Word Freqencies for Different Countries", x = "Country", y = "Frequency")
+```
+
+The figure above shows that people in America, Canada, Japan, Indonesia and France really enjoy their life with friends' company. Englishmen desire success but they also love afternoon tea. Italians need to find a balance between two amazing things, cars and beer. A wonderful life in their mind is driving a car to drink some beer. Indians and Pakistan cherish their family members more. Big house satisfies Pakistan's dream about perfect life. 
+
+## Marriage Analysis
+```{r}
+frequency_marital <- bag_of_words %>% 
+  group_by(marital) %>% 
+  count(word, sort = TRUE) %>% 
+  left_join(bag_of_words %>% 
+              group_by(marital) %>% 
+              summarise(total = n())) %>%
+  mutate(freq = n/total)
+
+head(frequency_marital,5)
+```
+
+```{r}
+frequency_marital <- frequency_marital %>% 
+  select(marital, word, freq) %>% 
+  spread(marital, freq) %>%
+  arrange(single, married)
+
+frequency_marital
+```
+
+```{r}
+ggplot(frequency_marital, aes(single, married)) +
+  geom_jitter(alpha = 0.1, size = 2.5, width = 0.25, height = 0.25, color = "#56B4E9") +
+  geom_text(aes(label = word), check_overlap = TRUE, vjust = 1.5) +
+  scale_x_log10(labels = percent_format()) +
+  scale_y_log10(labels = percent_format()) +
+  geom_abline(color = "black") + 
+  theme_bw() +
+  labs(title = "Word Freqencies for Singe and Married People", x = "Single", y = "Married")
+```
+
+"Home" and "house" make all the people married or not feel warm and happy. A single person can enjoy their "time" with their girlfriend or boyfriend, roommate, fiancee, and even a cat. But married people enjoy more happy moments with their children. It may results from they have became parent. Therefore, next analysis is about parenthood. 
+
+## Parenthood Analysis
+```{r}
+frequency_parenthood <- bag_of_words %>% 
+  group_by(parenthood) %>% 
+  count(word, sort = TRUE) %>% 
+  left_join(bag_of_words %>% 
+              group_by(parenthood) %>% 
+              summarise(total = n())) %>%
+  mutate(freq = n/total)
+
+head(frequency_parenthood,5)
+```
+
+```{r}
+frequency_parenthood <- frequency_parenthood %>% 
+  select(parenthood, word, freq) %>% 
+  spread(parenthood, freq) %>%
+  arrange(y, n)
+
+frequency_parenthood
+```
+
+```{r}
+ggplot(frequency_parenthood, aes(y,n)) +
+  geom_jitter(alpha = 0.1, size = 2.5, width = 0.25, height = 0.25, color = "#56B4E9") +
+  geom_text(aes(label = word), check_overlap = TRUE, vjust = 1.5) +
+  scale_x_log10(labels = percent_format()) +
+  scale_y_log10(labels = percent_format()) +
+  geom_abline(color = "black") + 
+  theme_bw() +
+  labs(title = "Word Freqencies for Parenthood or not", x = "Y", y = "N")
+```
+
+Actually, parents pay more attention to their kids or grandkids, but people without a baby consider their midterm more. It's reasonable since students who care exams have high probability of not having a kid. Whatever a parent or not, people need tasty food, satisfied job, amazing parties and good car to feel good. 
+
+
+## Marriage Analysis
+But what will leave in your memory for longer time? 
+```{r}
+frequency_reflection_period <- bag_of_words %>% 
+  group_by(reflection_period) %>% 
+  count(word, sort = TRUE) %>% 
+  left_join(bag_of_words %>% 
+              group_by(reflection_period) %>% 
+              summarise(total = n())) %>%
+  mutate(freq = n/total)
+
+head(frequency_reflection_period,5)
+```
+
+```{r}
+frequency_reflection_period <- frequency_reflection_period %>% 
+  select(reflection_period, word, freq) %>% 
+  spread(reflection_period, freq) %>%
+  arrange(hours_24, months_3)
+
+frequency_reflection_period
+```
+
+```{r}
+ggplot(frequency_reflection_period, aes(hours_24, months_3)) +
+  geom_jitter(alpha = 0.1, size = 2.5, width = 0.25, height = 0.25, color = "#56B4E9") +
+  geom_text(aes(label = word), check_overlap = TRUE, vjust = 1.5) +
+  scale_x_log10(labels = percent_format()) +
+  scale_y_log10(labels = percent_format()) +
+  geom_abline(color = "black") + 
+  theme_bw() +
+  labs(title = "Word Freqencies for Different Reflection Period", x = "24 Hours", y = "3 Months")
+```
+
+Seems a good morning, a cute dog, or even a interesting video can make your day. But with time passes, the important date, such as Valentine's Day, graduation day and birthday impress you the most in three months.
+
+## Marriage Analysis
+Will things become different in varous ages?
+```{r}
+frequency_age <- bag_of_words %>% 
+  group_by(age) %>% 
+  count(word, sort = TRUE) %>% 
+  left_join(bag_of_words %>% 
+              group_by(age) %>% 
+              summarise(total = n())) %>%
+  mutate(freq = n/total)
+
+# Remove all the non-numeric characters in age column and convert age to numeric 
+pattern <- "[0-9]*"
+frequency_age <- frequency_age[grepl("[0-9]*",frequency_age$age),]
+frequency_age <- frequency_age[!grepl("prefer not to say",frequency_age$age),]
+frequency_age <- frequency_age[!grepl("[a-z]^",frequency_age$age),]
+frequency_age$age <- as.integer(frequency_age$age)
+frequency_age <-na.omit(frequency_age)
+frequency_age <- frequency_age[frequency_age$age <= 95,]
+max(frequency_age$age)
+nrow(frequency_age)
+```
+
+
+```{r}
+ggplot(frequency_age, aes(x = age, y = freq)) +
+  geom_jitter(alpha = 0.1, size = 2.5, width = 0.25, height = 0.25, color = "#56B4E9") +
+  geom_text(aes(label = word), check_overlap = TRUE, vjust = 1.5) +
+  scale_x_continuous(limits = c(0,100)) +
+  theme_bw() +
+  scale_y_log10(labels = percent_format()) +
+  labs(title = "Word Freqencies for Different Ages", x = "Age", y = "Frequency")
+```
+
+When you are a child, you may feel good because birthday gift is a new bike. But when you grow up, friends support you and you start to pursue sucess in your career. Then getting older makes you want to spend more time with family. When you are around 80 years old, planting become attractive.
+
+```{r}
+frequency_age$age_range <- floor(frequency_age$age/10)*10 
+
+frequency_age %>%
+  group_by(age_range, word) %>%
+  summarise(freq = sum(freq)) %>%
+   left_join(frequency_age %>% 
+              group_by(age_range, word))
+
+frequency_age %>%
+  group_by(age_range) %>%
+  arrange(desc(freq)) %>%
+  slice(1:5) %>%
+  ggplot(aes(word, freq, fill = freq)) +
+  geom_col(show.legend = FALSE) + 
+  facet_wrap(~ age_range, scales = "free") +
+  ylab("Frequency") +
+  coord_flip()
+```
+
+When investigate deeper, some details attract me. Students concern passing the tests and receive an offer of admission from dream school. Granddaughter could be really sweet to grandparents in their sixties. 
+
+# Step 3: Sentiment analysis and correlation test
+
+## Sentiment Analysis
+At first, get the overall average sentiment score according to the ground truth category. No doubts the happy moments contain almost positive elements in every category. 
+```{r}
+words_by_category <- bag_of_words %>%
+  count(ground_truth_category, word, sort = TRUE) %>%
+  ungroup()
+words_by_category
+
+word_sentiments <- words_by_category %>%
+  inner_join(get_sentiments("afinn"), by = "word") %>%
+  group_by(ground_truth_category) %>%
+  summarize(score = sum(score * n) / sum(n))
+
+word_sentiments %>%
+  mutate(ground_truth_category = reorder(ground_truth_category, score)) %>%
+  ggplot(aes(ground_truth_category, score, fill = score > 0)) +
+  geom_col(show.legend = FALSE) +
+  coord_flip() +
+  ylab("Average sentiment score")
+```
+
+Then, sentiment analysis by word shows the majority of words express positive feelings and only two words "lost" and "bad" are negative. Guess the happy moment happened after the "lost" and "bad" moment. 
+```{r}
+contributions <- bag_of_words %>%
+  inner_join(get_sentiments("afinn"), by = "word") %>%
+  group_by(word) %>%
+  summarize(occurences = n(),
+            contribution = sum(score))
+
+contributions
+```
+
+```{r}
+contributions %>%
+  top_n(25, abs(contribution)) %>%
+  mutate(word = reorder(word, contribution)) %>%
+  ggplot(aes(word, contribution, fill = contribution > 0)) +
+  geom_col(show.legend = FALSE) +
+  coord_flip()
+```
+
+Now, try sentiment analysis by word in different ground truth categories. The negative word appears in achievement category, and the guess above may be right. First you lose and then you get something makes you happy. 
+```{r}
+top_sentiment_words <- words_by_category %>%
+  inner_join(get_sentiments("afinn"), by = "word") %>%
+  mutate(contribution = score * n / sum(n))
+
+top_sentiment_words <- na.omit(top_sentiment_words)
+```
+
+```{r}
+top_sentiment_words %>%
+  group_by(ground_truth_category) %>%
+  top_n(5, abs(contribution)) %>%
+  ungroup() %>%
+  mutate(word = reorder(word, contribution)) %>%
+  ggplot(aes(word, contribution, fill = contribution > 0)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ ground_truth_category, scales = "free", ncol = 3) +
+  coord_flip()
+```
+
+## Correlation Test
+Try to find some correlation between different category and the happy moment. Find tf-idf within different ground truth categories.
+```{r}
+tf_idf <- words_by_category %>%
+  bind_tf_idf(word, ground_truth_category, n) %>%
+  arrange(desc(tf_idf))
+tf_idf
+```
+
+The 10 terms with the highest tf-idf within each of the ground truth category.
+```{r}
+tf_idf %>%
+  group_by(ground_truth_category) %>%
+  top_n(10, tf_idf) %>%
+  ungroup() %>%
+  mutate(word = reorder(word, tf_idf)) %>%
+  ggplot(aes(word, tf_idf, fill = ground_truth_category)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ ground_truth_category, scales = "free") +
+  ylab("tf-idf") +
+  coord_flip()
+```
+
+```{r}
+category_cors <- words_by_category %>%
+  pairwise_cor(ground_truth_category, word, n, sort = TRUE)
+category_cors <- na.omit(category_cors)
+category_cors
+```
+
+```{r}
+category_cors %>%
+  filter(correlation > .1) %>%
+  graph_from_data_frame() %>%
+  ggraph(layout = "fr") +
+  geom_edge_link(aes(alpha = correlation, width = correlation)) +
+  geom_node_point(size = 6, color = "lightblue") +
+  geom_node_text(aes(label = name), repel = TRUE) +
+  theme_void()
+```
+
+Seems every category has relationship with each other. Maybe because the they both use the similar happy words to describe happy moment. 
+
+# Step 4: Create bigrams and find the high frequency phrases
+
+```{r}
+usenet_bigrams <- hm_data %>%
+  unnest_tokens(bigram, text, token = "ngrams", n = 2)
+
+usenet_bigram_counts <- usenet_bigrams %>%
+  count(ground_truth_category, bigram, sort = TRUE) %>%
+  ungroup() %>%
+  separate(bigram, c("word1", "word2"), sep = " ")
+
+usenet_bigram_counts <- na.omit(usenet_bigram_counts[order(usenet_bigram_counts$n),])
+
+# Pick top ten first word with highest frequency in the bigram data
+head(sort(table(usenet_bigram_counts$word1), decreasing = T),10)
+```
+
+Select the top ten first word with highest frequency in the bigram data to find the phrases. 
+```{r}
+happy_words <- c("day", "time","friend","finally", "found", "watched", "played","daughter", "son", "home")
+
+usenet_bigram_counts %>%
+  filter(word1 %in% happy_words) %>%
+  count(word1, word2, wt = n, sort = TRUE) %>%
+  inner_join(get_sentiments("afinn"), by = c(word2 = "word")) %>%
+  mutate(contribution = score * nn) %>%
+  group_by(word1) %>%
+  top_n(10, abs(contribution)) %>%
+  ungroup() %>%
+  mutate(word2 = reorder(paste(word2, word1, sep = "__"), contribution)) %>%
+  ggplot(aes(word2, contribution, fill = contribution > 0)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ word1, scales = "free", nrow = 3) +
+  scale_x_discrete(labels = function(x) gsub("__.+$", "", x)) +
+  xlab("Words preceded by a happy word") +
+  ylab("Sentiment score * # of occurrences") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  coord_flip()
+```
+
+When you finally finish something, you feel really good. You will be glad to hear the good news from your kids. Three things also make your day: stay at home, have fun with friends and watch video. 
+
+# Step 5: Topic modeling and create some labels for people
+If we ignore the ground truth category and find some new classifications. 
+```{r}
+# include only words that occur at least 50 times
+topic_word <- bag_of_words %>%
+  group_by(word) %>%
+  mutate(word_total = n()) %>%
+  ungroup() %>%
+  filter(word_total > 50)
+
+# convert into a document-term matrix
+# with document names such as sci.crypt_14147
+topic_dtm <- topic_word %>%
+  unite(document, ground_truth_category, wid) %>%
+  count(document, word) %>%
+  cast_dtm(document, word, n)
+```
+
+```{r}
+library(topicmodels)
+topic_lda <- LDA(topic_dtm, k = 8, control = list(seed = 2018))
+```
+
+```{r}
+topic_lda %>%
+  tidy() %>%
+  group_by(topic) %>%
+  top_n(10, beta) %>%
+  ungroup() %>%
+  mutate(term = reorder(term, beta)) %>%
+  ggplot(aes(term, beta, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free_y") +
+  coord_flip()
+```
+
+Divide the sample into eight types, and we can create some labels for them. Type 1 could be someone who really enjoys family life and expects surprise. Type 2 could be a primary school student. Type 3 could be professional women in their twenties. Type 4 could be beautiful girls who like shopping and trip. Type 5 could be college boy who is dating with someone. Type 6 could be married guys who have one or more kids. Type 7 could be a positive person who love the world. Type 8 could be a quiet guy who raises a dog or cat and loves reading. 
+
+Interesting analysis about happy moment ends here. 
