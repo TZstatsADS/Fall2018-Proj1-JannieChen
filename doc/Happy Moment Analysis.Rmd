@@ -37,7 +37,7 @@ library(widyr)
 library(ggraph)
 library(igraph)
 library(SnowballC)
-hm_data <- read_csv("/Users/janechen/Desktop/project1/processed_moments.csv")
+hm_data <- read_csv("./processed_moments.csv")
 
 urlfile<-'https://raw.githubusercontent.com/rit-public/HappyDB/master/happydb/data/demographic.csv'
 demo_data <- read_csv(urlfile)
